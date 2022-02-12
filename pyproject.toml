@@ -1,0 +1,110 @@
+[build-system]
+requires = ["flit_core >=3.3,<4,!=3.7"]
+build-backend = "flit_core.buildapi"
+
+[project]
+name = "alluka"
+readme = "README.md"
+requires-python = ">=3.9.0,<3.12"
+license = {file = "LICENSE"}
+authors = [ {name = "Faster Speeding", email="lucina@lmbyrne.dev"} ]
+keywords = ["DI", "injection"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: AnyIO",
+    "Framework :: AsyncIO",
+    "Framework :: Trio",
+    "License :: OSI Approved :: BSD License",
+    "Intended Audience :: Developers",
+    "Natural Language :: English",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Utilities",
+    "Typing :: Typed"
+]
+dependencies = []
+dynamic = ["description", "version"]
+
+[project.urls]
+homepage = "https://github.com/FasterSpeeding/Alluka"
+repository = "https://github.com/FasterSpeeding/Alluka"
+documentation = "https://alluka.cursed.solutions/"
+changelog = "https://github.com/FasterSpeeding/Alluka/blob/master/CHANGELOG.md"
+
+[tool.black]
+line-length     = 120
+target-version  = ["py39"]
+include         = ".*pyi?$"
+extend-exclude = ["^/alluka/_vendor/.*$"]
+
+[tool.coverage.run]
+concurrency = ["multiprocessing"]
+parallel = true
+branch = true
+timid = false
+source = ["alluka"]
+omit = ["alluka/_vendor/*"]
+
+[tool.coverage.report]
+precision = 2
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "^\\s*\\.\\.\\.$",
+    "^\\s*@abc.abstractmethod$",
+    "^if typing.TYPE_CHECKING:$"
+]
+
+[tool.isort]
+profile = "black"
+force_single_line = true
+skip = ["alluka/_vendor"]
+
+[tool.pyright]
+exclude = ["alluka/_vendor"]
+include = ["alluka", "noxfile.py", "tests"]
+
+pythonVersion = "3.9"
+typeCheckingMode = "strict"
+reportMissingModuleSource = "error"
+reportMissingTypeStubs = "error"
+
+reportUnknownMemberType = "warning"             # This messes with instance checking generic objects
+reportUnknownArgumentType = "warning"           # Pretty much the same as reportUnknownMemberType
+reportImportCycles = "warning"                  # This isn't necessarily an issue if it's type checking only.
+reportUnknownVariableType = "warning"           # Lotta false-positives, might fix/change later.
+reportPrivateUsage = "none"                     # Leads to funky false-positives around private module imports.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+required_plugins = ["anyio"]
+
+[tool.mypy]
+# some good strict settings
+strict = true
+warn_unreachable = true
+
+# more narrow type ignores
+show_error_codes = true
+
+# these are used by pyright
+warn_unused_ignores = false
+warn_redundant_casts = false
+
+# compatibility with pyright
+allow_redefinition = true
+disable_error_code = ["return", "return-value"]
+
+# Ignore vendored modules
+exclude = ["alluka/_vendor/"]
+
+[tool.slotscheck]
+strict-imports = true
+require-superclass = true
+require-subclass = true
+exclude-modules = "alluka._vendor"
