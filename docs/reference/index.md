@@ -1,3 +1,0 @@
-# alluka
-
-::: alluka

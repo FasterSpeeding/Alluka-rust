@@ -1,3 +1,0 @@
-# alluka.abc
-
-::: alluka.abc
