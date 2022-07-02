@@ -39,7 +39,7 @@ from collections import abc as collections
 
 import nox
 
-nox.options.sessions = ["reformat", "flake8", "spell-check", "slot-check", "type-check", "test", "verify-types"]  # type: ignore
+nox.options.sessions = ["spell-check", "test"]  # type: ignore
 GENERAL_TARGETS = ["./noxfile.py", "./tests"]
 _BLACKLISTED_TARGETS = {"_vendor", "__pycache__"}
 for path in pathlib.Path("./alluka").glob("*"):
@@ -52,10 +52,14 @@ _DEV_DEP_DIR = pathlib.Path("./dev-requirements")
 
 
 def _dev_dep(*values: str) -> collections.Iterator[str]:
-    return itertools.chain.from_iterable(("-r", str(_DEV_DEP_DIR / f"{value}.txt")) for value in values)
+    return itertools.chain.from_iterable(
+        ("-r", str(_DEV_DEP_DIR / f"{value}.txt")) for value in values
+    )
 
 
-def install_requirements(session: nox.Session, *other_requirements: str, first_call: bool = True) -> None:
+def install_requirements(
+    session: nox.Session, *other_requirements: str, first_call: bool = True
+) -> None:
     # --no-install --no-venv leads to it trying to install in the global venv
     # as --no-install only skips "reused" venvs and global is not considered reused.
     if not _try_find_option(session, "--skip-install", when_empty="True"):
@@ -65,7 +69,9 @@ def install_requirements(session: nox.Session, *other_requirements: str, first_c
         session.install("--upgrade", *map(str, other_requirements))
 
 
-def _try_find_option(session: nox.Session, name: str, *other_names: str, when_empty: str | None = None) -> str | None:
+def _try_find_option(
+    session: nox.Session, name: str, *other_names: str, when_empty: str | None = None
+) -> str | None:
     args_iter = iter(session.posargs)
     names = {name, *other_names}
 
@@ -80,7 +86,7 @@ def cleanup(session: nox.Session) -> None:
     import shutil
 
     # Remove directories
-    for raw_path in ["./dist", "./site", "./.nox", "./.pytest_cache", "./alluka.egg-info", "./coverage_html"]:
+    for raw_path in ["./site", "./.nox"]:
         path = pathlib.Path(raw_path)
         try:
             shutil.rmtree(str(path.absolute()))
@@ -139,34 +145,21 @@ def generate_docs(session: nox.Session) -> None:
         shutil.copy(path, pathlib.Path(output_directory) / path)
 
 
-@nox.session(reuse_venv=True)
-def flake8(session: nox.Session) -> None:
-    """Run this project's modules against the pre-defined flake8 linters."""
-    install_requirements(session, *_dev_dep("flake8"))
-    session.run("flake8", *GENERAL_TARGETS)
-
-
-@nox.session(reuse_venv=True, name="slot-check")
-def slot_check(session: nox.Session) -> None:
-    """Check this project's slotted classes for common mistakes."""
-    install_requirements(session, ".", "--use-feature=in-tree-build", *_dev_dep("lint"))
-    session.run("slotscheck", "-m", "alluka")
-
-
 @nox.session(reuse_venv=True, name="spell-check")
 def spell_check(session: nox.Session) -> None:
     """Check this project's text-like files for common spelling mistakes."""
-    install_requirements(session, *_dev_dep("lint"))  # include_standard_requirements=False
+    install_requirements(
+        session, *_dev_dep("lint")
+    )  # include_standard_requirements=False
     session.run(
         "codespell",
         *GENERAL_TARGETS,
-        ".flake8",
         ".gitignore",
         "LICENSE",
         "pyproject.toml",
         "CHANGELOG.md",
         "CODE_OF_CONDUCT.md",
-        "CONTRIBUTING.md",
+        # "CONTRIBUTING.md",
         "README.md",
         "./github",
         ".pre-commit-config.yaml",
@@ -175,129 +168,10 @@ def spell_check(session: nox.Session) -> None:
 
 
 @nox.session(reuse_venv=True)
-def build(session: nox.Session) -> None:
-    """Build this project using flit."""
-    install_requirements(session, *_dev_dep("publish"))
-    session.log("Starting build")
-    session.run("flit", "build")
-
-
-@nox.session(reuse_venv=True)
-def publish(session: nox.Session, test: bool = False) -> None:
-    """Publish this project to pypi."""
-    install_requirements(session, *_dev_dep("publish"))
-    install_requirements(session, ".", "--use-feature=in-tree-build", first_call=False)
-
-    env: dict[str, str] = {}
-
-    if username := _try_find_option(session, "-u", "--username"):
-        env["FLIT_USERNAME"] = username
-
-    if password := _try_find_option(session, "-p", "--password"):
-        env["FLIT_PASSWORD"] = password
-
-    if index_url := _try_find_option(session, "-i", "--index-url"):
-        env["FLIT_INDEX_URL"] = index_url
-
-    elif test:
-        env["FLIT_INDEX_URL"] = "https://test.pypi.org/legacy/"
-
-    else:
-        env["FLIT_INDEX_URL"] = "https://upload.pypi.org/legacy/"
-
-    session.log("Initiating TestPYPI upload" if test else "Initiating PYPI upload")
-    session.run("flit", "publish", env=env)
-
-
-@nox.session(name="test-publish", reuse_venv=True)
-def test_publish(session: nox.Session) -> None:
-    """Publish this project to test pypi."""
-    publish(session, test=True)
-
-
-@nox.session(reuse_venv=True)
-def reformat(session: nox.Session) -> None:
-    """Reformat this project's modules to fit the standard style."""
-    install_requirements(session, *_dev_dep("reformat"))  # include_standard_requirements=False
-    session.run("black", *GENERAL_TARGETS, "--extend-exclude", "^/alluka/_vendor/.*$")
-    session.run("isort", *GENERAL_TARGETS)
-    session.run("sort-all", *map(str, pathlib.Path("./alluka/").glob("**/*.py")), success_codes=[0, 1])
-
-
-@nox.session(reuse_venv=True)
 def test(session: nox.Session) -> None:
     """Run this project's tests using pytest."""
-    install_requirements(session, ".", "--use-feature=in-tree-build", *_dev_dep("tests"))
+    install_requirements(
+        session, ".", "--use-feature=in-tree-build", *_dev_dep("tests")
+    )
     # TODO: can import-mode be specified in the config.
     session.run("pytest", "-n", "auto", "--import-mode", "importlib")
-
-
-@nox.session(name="test-coverage", reuse_venv=True)
-def test_coverage(session: nox.Session) -> None:
-    """Run this project's tests while recording test coverage."""
-    install_requirements(session, ".", "--use-feature=in-tree-build", *_dev_dep("tests"))
-    # TODO: can import-mode be specified in the config.
-    # https://github.com/nedbat/coveragepy/issues/1002
-    session.run(
-        "pytest", "-n", "auto", "--cov=alluka", "--cov-report", "html:coverage_html", "--cov-report", "xml:coverage.xml"
-    )
-
-
-def _run_pyright(session: nox.Session, *args: str) -> None:
-    if _try_find_option(session, "--force-env", when_empty="True"):
-        session.env["PYRIGHT_PYTHON_GLOBAL_NODE"] = "off"
-
-    if version := _try_find_option(session, "--pyright-version"):
-        session.env["PYRIGHT_PYTHON_FORCE_VERSION"] = version
-
-    session.run("python", "-m", "pyright", "--version")
-    session.run("python", "-m", "pyright", *args)
-
-
-@nox.session(name="type-check", reuse_venv=True)
-def type_check(session: nox.Session) -> None:
-    """Statically analyse and veirfy this project using Pyright."""
-    install_requirements(session, ".", "--use-feature=in-tree-build", *_dev_dep("nox", "tests", "type-checking"))
-    _run_pyright(session)
-    session.run("python", "-m", "mypy", "--version")
-    # Right now MyPy is allowed to fail without failing CI as the alternative is to let MyPy bugs block releases.
-    session.run("python", "-m", "mypy", "alluka", "--show-error-codes", success_codes=[0, 1])
-
-
-@nox.session(name="verify-types", reuse_venv=True)
-def verify_types(session: nox.Session) -> None:
-    """Verify the "type completeness" of types exported by the library using Pyright."""
-    install_requirements(session, ".", "--use-feature=in-tree-build", *_dev_dep("type-checking"))
-    _run_pyright(session, "--verifytypes", "alluka", "--ignoreexternal")
-
-
-@nox.session(name="check-dependencies")
-def check_dependencies(session: nox.Session) -> None:
-    """Verify that all the dependencies declared in pyproject.toml are up to date."""
-    import httpx
-
-    # Note: this can be linked to a specific hash by adding it between raw and {file.name} as another route segment.
-    with httpx.Client() as client:
-        requirements = client.get(
-            "https://gist.githubusercontent.com/FasterSpeeding/13e3d871f872fa09cf7bdc4144d62b2b/raw/requirements.json"
-        ).json()
-
-        # Note: this can be linked to a specific hash by adding it between raw and {file.name} as another route segment.
-        code = client.get(
-            "https://gist.githubusercontent.com/FasterSpeeding/13e3d871f872fa09cf7bdc4144d62b2b/raw/check_dependency.py"
-        ).read()
-
-    install_requirements(session, *requirements)
-    # This is saved to a temporary file to avoid the source showing up in any of the output.
-
-    # A try, finally is used to delete the file rather than relying on delete=True behaviour
-    # as on Windows the file cannot be accessed by other processes if delete is True.
-    file = tempfile.NamedTemporaryFile(delete=False)
-    try:
-        with file:
-            file.write(code)
-
-        session.run("python", file.name)
-
-    finally:
-        pathlib.Path(file.name).unlink(missing_ok=False)
