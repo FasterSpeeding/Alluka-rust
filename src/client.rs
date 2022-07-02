@@ -147,8 +147,8 @@ impl Client {
 
         if !descriptors.is_empty() {
             let descriptors = descriptors.iter().map(|(key, value)| match value {
-                Injected::Type(type_) => type_.resolve_rust(py, self, ctx).map(|value| (key, value)),
-                Injected::Callback(callback) => callback.resolve_rust(py, self, ctx).map(|value| (key, value)),
+                Injected::Type(type_) => type_.resolve(py, self, ctx).map(|value| (key, value)),
+                Injected::Callback(callback) => callback.resolve(py, self, ctx).map(|value| (key, value)),
             });
             if let Some(dict) = kwargs {
                 for entry in descriptors {
@@ -199,13 +199,13 @@ impl Client {
                 .iter()
                 .map(|(key, value)| match value {
                     Injected::Type(type_) => {
-                        let value = type_.resolve_rust(py, &slf_borrow, &ctx_borrow)?;
+                        let value = type_.resolve(py, &slf_borrow, &ctx_borrow)?;
                         kwargs.set_item(key, value)?;
                         Ok(None)
                     }
                     Injected::Callback(callback) => Ok(Some((
                         key.to_owned(),
-                        callback.resolve_rust_async(py, slf.clone_ref(py), ctx.clone_ref(py))?,
+                        callback.resolve_async(py, slf.clone_ref(py), ctx.clone_ref(py))?,
                     ))),
                 })
                 .filter_map(Result::transpose)
@@ -281,22 +281,26 @@ impl Client {
         args: &PyTuple,
         kwargs: Option<&PyDict>,
     ) -> PyResult<PyObject> {
-        Py::new(py, BasicContext::new(slf))?
-            .borrow(py)
-            .call_with_di(py, callback, args, kwargs)
-            .map(|value| value.to_object(py))
+        Self::call_with_ctx(
+            slf.clone_ref(py),
+            py,
+            Py::new(py, BasicContext::new(slf))?,
+            callback,
+            args,
+            kwargs,
+        )
     }
 
     #[args(ctx, callback, "/", args = "*", kwargs = "**")]
     pub fn call_with_ctx(
-        _self: Py<Self>,
-        _py: Python,
-        _ctx: &PyAny,
-        _callback: &PyAny,
-        _args: &PyTuple,
-        _kwargs: Option<&PyDict>,
+        _slf: Py<Self>,
+        py: Python,
+        ctx: Py<BasicContext>,
+        callback: &PyAny,
+        args: &PyTuple,
+        kwargs: Option<&PyDict>,
     ) -> PyResult<PyObject> {
-        unimplemented!("Custom contexts are not supported yet")
+        ctx.borrow(py).call_with_di(py, callback, args, kwargs)
     }
 
     #[args(callback, "/", args = "*", kwargs = "**")]
@@ -307,19 +311,26 @@ impl Client {
         args: Py<PyTuple>,
         kwargs: Option<Py<PyDict>>,
     ) -> PyResult<&PyAny> {
-        BasicContext::call_with_async_di(Py::new(py, BasicContext::new(slf))?, py, callback, args, kwargs)
+        Self::call_with_ctx_async(
+            slf.clone_ref(py),
+            py,
+            Py::new(py, BasicContext::new(slf))?,
+            callback,
+            args,
+            kwargs,
+        )
     }
 
     #[args(ctx, callback, "/", args = "*", kwargs = "**")]
     pub fn call_with_ctx_async(
-        _self: PyRef<'_, Self>,
-        _py: Python,
-        _ctx: &PyAny,
-        _callback: &PyAny,
-        _args: &PyTuple,
-        _kwargs: Option<&PyDict>,
-    ) -> PyResult<PyObject> {
-        unimplemented!("Custom contexts are not supported yet")
+        _slf: Py<Self>,
+        py: Python<'_>,
+        ctx: Py<BasicContext>,
+        callback: PyObject,
+        args: Py<PyTuple>,
+        kwargs: Option<Py<PyDict>>,
+    ) -> PyResult<&PyAny> {
+        BasicContext::call_with_async_di(ctx, py, callback, args, kwargs)
     }
 
     #[args(type_, value, "/")]

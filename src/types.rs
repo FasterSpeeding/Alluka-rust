@@ -42,11 +42,7 @@ pub struct InjectedCallback {
 }
 
 impl InjectedCallback {
-    pub fn resolve(&self, _py: Python, _client: &mut Client, _ctx: Py<BasicContext>) -> PyResult<PyObject> {
-        unimplemented!("Custom contexts are not yet supported")
-    }
-
-    pub fn resolve_rust<'p>(
+    pub fn resolve<'p>(
         &'p self,
         py: Python<'p>,
         client: &'p PyRef<'p, Client>,
@@ -60,11 +56,7 @@ impl InjectedCallback {
         }
     }
 
-    pub fn resolve_async(&self, _py: Python, _client: &mut Client, _ctx: &PyAny) -> PyResult<PyObject> {
-        unimplemented!("Custom contexts are not yet supported")
-    }
-
-    pub fn resolve_rust_async(
+    pub fn resolve_async(
         &self,
         py: Python,
         client: Py<Client>,
@@ -89,16 +81,11 @@ impl InjectedCallback {
 pub struct InjectedType {
     default: Option<PyObject>,
     repr_type: PyObject,
-    types: Vec<PyObject>,
     type_ids: Vec<isize>,
 }
 
 impl InjectedType {
-    pub fn resolve(&self, _py: Python, _ctx: &PyAny) -> PyResult<PyObject> {
-        unimplemented!("Custom contexts are not yet supported")
-    }
-
-    pub fn resolve_rust<'p>(
+    pub fn resolve<'p>(
         &'p self,
         py: Python<'p>,
         client: &'p PyRef<'p, Client>,
@@ -145,10 +132,9 @@ impl Injected {
             default: default.map(|value| value.to_object(py)),
             repr_type: repr_type.to_object(py),
             type_ids: types
-                .iter()
+                .into_iter()
                 .map(|type_| type_.hash())
                 .collect::<PyResult<Vec<isize>>>()?,
-            types: types.iter().map(|type_| type_.to_object(py)).collect(),
         }))
     }
 }
