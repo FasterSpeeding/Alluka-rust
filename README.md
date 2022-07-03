@@ -9,7 +9,7 @@ as this follows the same interface (`alluka_rust.Client` and `alluka_rust.BasicC
 can be used like `alluka.Client` and `alluka.BasicContext`)
 
 If you want to patch the default Alluka implementation with this you can simply
-set the `ALLUKA_RUST_PATCH` env variable to `"true" before importing `alluka_rust`
+set the `ALLUKA_RUST_PATCH` env variable to `"true"` before importing `alluka_rust`
 or call `alluka_rust.patch_alluka()` before starting anything which uses Alluka.
 
 # Limitations
