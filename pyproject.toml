@@ -4,3 +4,4 @@ build-backend = "maturin"
 
 [project]
 name = "alluka_rust"
+dependencies = ["alluka~=0.1.2", "anyio~=3.0"]
