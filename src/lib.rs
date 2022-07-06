@@ -65,7 +65,7 @@ fn alluka_rust(py: Python, module: &PyModule) -> PyResult<()> {
         "__coverage__",
         "https://codeclimate.com/github/FasterSpeeding/Alluka-rust",
     )?;
-    module.add("__docs__", "https://alluka_rust.cursed.solutions/")?;
+    module.add("__docs__", "https://github.com/FasterSpeeding/Alluka-rust/blob/master/README.md")?;
     module.add("__email__", "lucina@lmbyrne.dev")?;
     module.add(
         "__issue_tracker__",
@@ -73,7 +73,7 @@ fn alluka_rust(py: Python, module: &PyModule) -> PyResult<()> {
     )?;
     module.add("__license__", "BSD")?;
     module.add("__url__", "https://github.com/FasterSpeeding/Alluka-rust")?;
-    module.add("__version__", "0.1.1")?;
+    module.add("__version__", "0.1.0")?;
     module.add_class::<Client>()?;
     module.add_class::<BasicContext>()?;
     module.add_function(wrap_pyfunction!(patch_alluka, module)?)?;
