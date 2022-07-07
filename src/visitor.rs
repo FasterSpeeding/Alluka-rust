@@ -229,7 +229,12 @@ impl ParameterVisitor {
     fn parse_type(py: Python, type_: &PyAny, other_default: Option<&PyAny>) -> PyResult<Injected> {
         let typing = import_typing(py)?;
         let origin = typing.call_method1("get_origin", (type_,))?;
-        if !origin.is(import_type(py)?.getattr("UnionType")?) && !origin.is(typing.getattr("Union")?) {
+        // UnionType is only present on 3.10+ so AttributeErrors should be ignored.
+        let is_ut = import_type(py)?
+            .getattr("UnionType")
+            .map(|value| origin.is(value))
+            .unwrap_or_default();
+        if !is_ut && !origin.is(typing.getattr("Union")?) {
             return Injected::new_type(py, other_default, type_, vec![type_]);
         };
 

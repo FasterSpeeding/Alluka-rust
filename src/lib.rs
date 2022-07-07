@@ -65,7 +65,10 @@ fn alluka_rust(py: Python, module: &PyModule) -> PyResult<()> {
         "__coverage__",
         "https://codeclimate.com/github/FasterSpeeding/Alluka-rust",
     )?;
-    module.add("__docs__", "https://github.com/FasterSpeeding/Alluka-rust/blob/master/README.md")?;
+    module.add(
+        "__docs__",
+        "https://github.com/FasterSpeeding/Alluka-rust/blob/master/README.md",
+    )?;
     module.add("__email__", "lucina@lmbyrne.dev")?;
     module.add(
         "__issue_tracker__",
