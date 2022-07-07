@@ -93,7 +93,11 @@ def test(session: nox.Session) -> None:
             external=True,
         )
         install_requirements(
-            session, "-r", "./dev-requirements.txt", "-r", str(target / "dev-requirements/tests.txt")
+            session,
+            "-r",
+            "./dev-requirements.txt",
+            "-r",
+            str(target / "dev-requirements/tests.txt"),
         )
         shutil.copyfile("./conftest.py", str(target / "conftest.py"))
         session.run("maturin", "develop")
