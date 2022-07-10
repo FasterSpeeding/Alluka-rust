@@ -13,7 +13,13 @@ features = ["extension-module"]
 version = "0.16.5"
 
 [dependencies.pyo3-anyio]
-version = "0.2.0"
+# version = "0.2.0"
+git = "https://github.com/fasterspeeding/pyo3-anyio"
+branch = "task/args-pyany"
+
+[dependencies.tokio]
+features = ["sync"]
+version = "1.19.2"
 
 [profile.release]
 codegen-units = 1
