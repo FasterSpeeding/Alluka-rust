@@ -32,20 +32,22 @@ use std::collections::hash_map::RawEntryMut;
 use std::collections::HashMap;
 use std::convert::AsRef;
 use std::future::Future;
-use std::pin::Pin;
-use std::sync::{Arc, OnceLock, RwLock};
+use std::sync::{Arc, OnceLock};
 
 use pyo3::exceptions::PyKeyError;
 use pyo3::pycell::PyRef;
 use pyo3::types::{IntoPyDict, PyDict, PyTuple};
 use pyo3::{IntoPy, Py, PyAny, PyErr, PyObject, PyRefMut, PyResult, Python, ToPyObject};
-use pyo3_anyio::tokio::{coro_to_fut, fut_into_coro};
+use pyo3_anyio::tokio::{await_py1, fut_into_coro};
+use tokio::sync::RwLock;
 
 use crate::types::{Injected, InjectedTuple};
 use crate::visitor::{Callback, ParameterVisitor};
 
 
 pyo3::import_exception!(alluka._errors, AsyncOnlyError);
+
+type DescriptorMap = Arc<RwLock<HashMap<isize, Arc<Box<[InjectedTuple]>>>>>;
 
 static ALLUKA: OnceLock<PyObject> = OnceLock::new();
 static ASYNCIO: OnceLock<PyObject> = OnceLock::new();
@@ -72,40 +74,33 @@ fn import_self_injecting(py: Python) -> PyResult<&PyAny> {
 #[pyo3::pyclass(subclass)]
 pub struct Client {
     callback_overrides: HashMap<isize, PyObject>,
-    descriptors: RwLock<HashMap<isize, Arc<Box<[InjectedTuple]>>>>,
+    descriptors: DescriptorMap,
     introspect_annotations: bool,
+    maybe_await: PyObject,
     type_dependencies: HashMap<isize, PyObject>,
 }
 
-type BoxedFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
 
-enum MaybeAsync {
-    Receiver(BoxedFuture<PyResult<PyObject>>),
-    Result(PyObject),
-}
+async fn build_descriptors_async(
+    all_descriptors: DescriptorMap,
+    key: isize,
+    callback: PyObject,
+) -> PyResult<Arc<Box<[InjectedTuple]>>> {
+    // Avoid a write lock if we already have the descriptors.
+    if let Some(descriptors) = all_descriptors.read().await.get(&key).map(Arc::clone) {
+        return Ok(descriptors);
+    }
 
-impl MaybeAsync {
-    fn from_result(py: Python, value: &PyAny) -> PyResult<Self> {
-        if import_asyncio(py)?.call_method1("iscoroutine", (value,))?.is_true()? {
-            Ok(MaybeAsync::Receiver(Box::pin(coro_to_fut(value)?)))
-        } else {
-            Ok::<_, PyErr>(MaybeAsync::Result(value.to_object(py)))
+    let mut descriptors = all_descriptors.write().await;
+    let entry = descriptors.raw_entry_mut().from_key(&key);
+    Ok(match entry {
+        RawEntryMut::Occupied(entry) => entry.into_key_value().1.clone(),
+        RawEntryMut::Vacant(entry) => {
+            let descriptors =
+                Python::with_gil(|py| Callback::new(py, callback.as_ref(py))?.accept::<ParameterVisitor>(py))?;
+            entry.insert(key, Arc::new(Box::from(descriptors))).1.clone()
         }
-    }
-}
-
-enum OrEarlyReturn {
-    Iterator(Vec<(String, BoxedFuture<PyResult<PyObject>>)>),
-    EarlyReturn(MaybeAsync),
-}
-
-impl OrEarlyReturn {
-    fn early_return(py: Python, callback: &PyAny, args: &PyTuple, kwargs: Option<&PyDict>) -> PyResult<Self> {
-        Ok(OrEarlyReturn::EarlyReturn(MaybeAsync::from_result(
-            py,
-            callback.call(args, kwargs)?,
-        )?))
-    }
+    })
 }
 
 
@@ -113,11 +108,11 @@ impl Client {
     fn build_descriptors(&self, py: Python, callback: &PyAny) -> PyResult<Arc<Box<[InjectedTuple]>>> {
         let key = callback.hash()?;
         // Avoid a write lock if we already have the descriptors.
-        if let Some(descriptors) = self.descriptors.read().unwrap().get(&key).map(Arc::clone) {
+        if let Some(descriptors) = self.descriptors.blocking_read().get(&key).map(Arc::clone) {
             return Ok(descriptors);
         }
 
-        let mut descriptors = self.descriptors.write().unwrap();
+        let mut descriptors = self.descriptors.blocking_write();
         let entry = descriptors.raw_entry_mut().from_key(&key);
         Ok(match entry {
             RawEntryMut::Occupied(entry) => entry.into_key_value().1.clone(),
@@ -177,19 +172,23 @@ impl Client {
         args: Py<PyTuple>,
         mut kwargs: Option<Py<PyDict>>,
     ) -> PyResult<PyObject> {
+        let (callback_key, callback_clone, all_descriptors, maybe_await) = Python::with_gil(|py| {
+            let slf_borrow = slf.borrow(py);
+            Ok::<_, PyErr>((
+                callback.as_ref(py).hash()?,
+                callback.clone_ref(py),
+                slf_borrow.descriptors.clone(),
+                slf_borrow.maybe_await.clone_ref(py),
+            ))
+        })?;
+
+        let descriptors = build_descriptors_async(all_descriptors, callback_key, callback_clone).await?;
+
         let result = Python::with_gil(|py| {
             let slf_borrow = slf.borrow(py);
-            let descriptors = slf_borrow.build_descriptors(py, callback.as_ref(py))?;
+
             if descriptors.is_empty() {
-                if let Some(kwargs) = kwargs.as_ref() {
-                    return OrEarlyReturn::early_return(
-                        py,
-                        callback.as_ref(py),
-                        args.as_ref(py),
-                        Some(kwargs.as_ref(py)),
-                    );
-                }
-                return OrEarlyReturn::early_return(py, callback.as_ref(py), args.as_ref(py), None);
+                return Ok::<_, PyErr>(None);
             }
 
             let ctx_borrow = ctx.borrow(py);
@@ -212,25 +211,36 @@ impl Client {
                 .collect::<PyResult<Vec<_>>>()?;
 
             if descriptors.is_empty() {
-                return OrEarlyReturn::early_return(py, callback.as_ref(py), args.as_ref(py), Some(kwargs));
+                return Ok(None);
             }
 
-            Ok(OrEarlyReturn::Iterator(descriptors))
+            Ok(Some(descriptors))
         })?;
 
-        let iter = match result {
-            OrEarlyReturn::EarlyReturn(MaybeAsync::Receiver(receiver)) => return receiver.await,
-            OrEarlyReturn::EarlyReturn(MaybeAsync::Result(value)) => return Ok(value),
-            OrEarlyReturn::Iterator(iter) => iter,
+        if result.is_none() {
+            return Python::with_gil(|py| match kwargs {
+                Some(kwargs) => await_py1(maybe_await.as_ref(py), &[
+                    callback.as_ref(py),
+                    args.as_ref(py),
+                    kwargs.as_ref(py),
+                ]),
+                None => await_py1(maybe_await.as_ref(py), &[
+                    callback.as_ref(py),
+                    args.as_ref(py),
+                    py.None().as_ref(py),
+                ]),
+            })?
+            .await;
         };
 
+        let iter = result.unwrap();
         let mut more_kwargs = Vec::<(String, PyObject)>::with_capacity(iter.len());
         for result in iter {
             let (name, fut) = result;
             more_kwargs.push((name, fut.await?));
         }
 
-        let result = Python::with_gil(|py| {
+        Python::with_gil(|py| {
             // At this point kwargs is guaranteed to exist and this makes
             // handling the lifetimes of kwargs.as_ref(py) easier.
             let kwargs = kwargs.as_ref().unwrap();
@@ -239,14 +249,13 @@ impl Client {
                 kwargs_ref.set_item(name, value)?;
             }
 
-            MaybeAsync::from_result(py, callback.call(py, args.as_ref(py), Some(kwargs_ref))?.as_ref(py))
-        })?;
-
-
-        match result {
-            MaybeAsync::Receiver(receiver) => receiver.await,
-            MaybeAsync::Result(result) => Ok(result),
-        }
+            await_py1(maybe_await.as_ref(py), &[
+                callback.as_ref(py),
+                args.as_ref(py),
+                kwargs_ref,
+            ])
+        })?
+        .await
     }
 }
 
@@ -254,11 +263,31 @@ impl Client {
 impl Client {
     #[new]
     #[args("*", introspect_annotations = "true")]
-    fn new(introspect_annotations: bool) -> PyResult<Self> {
+    fn new(py: Python, introspect_annotations: bool) -> PyResult<Self> {
+        let globals_ = [("iscoroutine", py.import("asyncio")?.getattr("iscoroutine")?)].into_py_dict(py);
+        py.run(
+            r#"
+async def maybe_await(callback, args, kwargs):
+    if kwargs is None:
+        result = callback(*args)
+    else:
+        result = callback(*args, **kwargs)
+
+    if iscoroutine(result):
+        return await result
+
+    return result
+    "#,
+            Some(globals_),
+            None,
+        )
+        .unwrap();
+
         Ok(Self {
             callback_overrides: HashMap::new(),
-            descriptors: RwLock::new(HashMap::new()),
+            descriptors: Arc::new(RwLock::new(HashMap::new())),
             introspect_annotations,
+            maybe_await: globals_.get_item("maybe_await").unwrap().to_object(py),
             type_dependencies: HashMap::new(),
         })
     }
@@ -300,6 +329,7 @@ impl Client {
         args: &PyTuple,
         kwargs: Option<&PyDict>,
     ) -> PyResult<PyObject> {
+        println!("b");
         ctx.borrow(py).call_with_di(py, callback, args, kwargs)
     }
 
