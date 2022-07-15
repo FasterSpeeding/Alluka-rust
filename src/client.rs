@@ -91,7 +91,7 @@ fn import_self_injecting(py: Python) -> PyResult<&PyAny> {
         .map(|value| value.as_ref(py))
 }
 
-#[pyo3::pyclass(subclass)]
+#[pyo3::pyclass(subclass, weakref)]
 pub struct Client {
     callback_overrides: HashMap<isize, PyObject>,
     descriptors: DescriptorMap,
@@ -459,7 +459,7 @@ async def maybe_await(callback, args, kwargs):
     }
 }
 
-#[pyo3::pyclass(subclass)]
+#[pyo3::pyclass(subclass, weakref)]
 pub struct BasicContext {
     pub client: Py<Client>,
     result_cache: HashMap<isize, PyObject>,
