@@ -52,7 +52,7 @@ class Client(alluka.abc.Client):
 
     def __init__(self, *, introspect_annotations: bool = True) -> None: ...
 
-class Context(alluka.abc.Context):
+class BasicContext(alluka.abc.Context):
     __slots__: _collections.Iterable[str]
 
     def __init__(self, client: Client, /) -> None: ...
