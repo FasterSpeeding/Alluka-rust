@@ -145,15 +145,17 @@ impl Client {
         })
     }
 
-    fn get_py_self(&self) -> &PyObject {
-        self.py_self.get().unwrap()
-    }
-
-    pub fn get_type_dependency_rust<'p>(&'p self, py: Python<'p>, type_: &isize) -> Option<&'p PyObject> {
+    pub fn get_type_dependency_rust<'p>(
+        self: &'p PyRef<'p, Self>,
+        py: Python<'p>,
+        type_: &isize,
+    ) -> Option<&'p PyObject> {
         self.type_dependencies.get(type_).or_else(|| {
             let client_types = import_client_types(py);
             if &client_types.0 == type_ || &client_types.1 == type_ {
-                return Some(self.get_py_self());
+                return Some(self.py_self.get_or_init(|| unsafe {
+                    Py::from_borrowed_ptr(py, PyWeakref_NewRef(self.as_ptr(), null_mut()))
+                }));
             } else {
                 None
             }
@@ -168,9 +170,6 @@ impl Client {
         args: &PyTuple,
         mut kwargs: Option<&'p PyDict>,
     ) -> PyResult<&'p PyAny> {
-        self.py_self
-            .get_or_init(|| unsafe { Py::from_borrowed_ptr(py, PyWeakref_NewRef(self.as_ptr(), null_mut())) });
-
         let descriptors = self.build_descriptors(py, callback)?;
 
         if !descriptors.is_empty() {
@@ -207,9 +206,6 @@ impl Client {
     ) -> PyResult<PyObject> {
         let (callback_key, callback_clone, all_descriptors, maybe_await) = Python::with_gil(|py| {
             let slf_borrow = slf.borrow(py);
-            slf_borrow
-                .py_self
-                .get_or_init(|| unsafe { Py::from_borrowed_ptr(py, PyWeakref_NewRef(slf.as_ptr(), null_mut())) });
             Ok::<_, PyErr>((
                 callback.as_ref(py).hash()?,
                 callback.clone_ref(py),
@@ -467,11 +463,12 @@ pub struct BasicContext {
     pub client: Py<Client>,
     result_cache: HashMap<isize, PyObject>,
     special_cased_types: HashMap<isize, PyObject>,
+    py_self: OnceLock<PyObject>,
 }
 
 impl BasicContext {
     pub fn get_type_dependency_rust<'p>(
-        &'p self,
+        self: &'p PyRef<'p, Self>,
         py: Python<'p>,
         client: &'p PyRef<'p, Client>,
         type_: &isize,
@@ -479,6 +476,16 @@ impl BasicContext {
         self.special_cased_types
             .get(type_)
             .or_else(|| client.get_type_dependency_rust(py, type_))
+            .or_else(|| {
+                if type_ == import_context_type(py) {
+                    Some(
+                        self.py_self
+                            .get_or_init(|| unsafe { Py::from_borrowed_ptr(py, self.as_ptr()) }),
+                    )
+                } else {
+                    None
+                }
+            })
     }
 
     pub fn call_with_di_rust<'p>(
@@ -512,6 +519,7 @@ impl BasicContext {
             client,
             result_cache: HashMap::with_capacity(0),
             special_cased_types: HashMap::with_capacity(0),
+            py_self: OnceLock::new(),
         }
     }
 
@@ -567,12 +575,12 @@ impl BasicContext {
     }
 
     #[args(type_, "/", "*", default)]
-    fn get_type_dependency(&self, py: Python, type_: &PyAny, default: Option<PyObject>) -> PyResult<PyObject> {
-        let hash = type_.hash()?;
-        if let Some(result) = self.special_cased_types.get(&hash) {
-            return Ok(result.clone_ref(py));
-        }
-
+    fn get_type_dependency(
+        self: PyRef<'_, Self>,
+        py: Python,
+        type_: &PyAny,
+        default: Option<PyObject>,
+    ) -> PyResult<PyObject> {
         if let Some(result) = self.get_type_dependency_rust(py, &self.client.borrow(py), &type_.hash()?) {
             return Ok(result.clone_ref(py));
         }
