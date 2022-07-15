@@ -366,7 +366,6 @@ async def maybe_await(callback, args, kwargs):
         args: &PyTuple,
         kwargs: Option<&PyDict>,
     ) -> PyResult<PyObject> {
-        println!("b");
         ctx.borrow(py).call_with_di(py, callback, args, kwargs)
     }
 
