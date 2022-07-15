@@ -73,7 +73,8 @@ fn import_client_types(py: Python) -> &(isize, isize) {
     CLIENT_TYPES
         .get_or_try_init(|| {
             let abc_hash = py.import("alluka.abc")?.getattr("Client")?.hash()?;
-            Ok::<_, PyErr>((py.import("alluka")?.getattr("Client")?.hash()?, abc_hash))
+            let impl_hash = py.import("alluka")?.getattr("Client")?.hash()?;
+            Ok::<_, PyErr>((impl_hash, abc_hash))
         })
         .unwrap()
 }
@@ -478,10 +479,9 @@ impl BasicContext {
             .or_else(|| client.get_type_dependency_rust(py, type_))
             .or_else(|| {
                 if type_ == import_context_type(py) {
-                    Some(
-                        self.py_self
-                            .get_or_init(|| unsafe { Py::from_borrowed_ptr(py, self.as_ptr()) }),
-                    )
+                    Some(self.py_self.get_or_init(|| unsafe {
+                        Py::from_borrowed_ptr(py, PyWeakref_NewRef(self.as_ptr(), null_mut()))
+                    }))
                 } else {
                     None
                 }
