@@ -90,9 +90,9 @@ dependencies = [
 
 [[package]]
 name = "once_cell"
-version = "1.12.0"
+version = "1.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7709cef83f0c1f58f666e746a08b21e0085f7440fa6a29cc194d68aac97a4225"
+checksum = "18a6dbe30758c9f83eb00cbea4ac95966305f5a7772f3f42ebfc7fc7eddbd8e1"
 
 [[package]]
 name = "parking_lot"
@@ -150,8 +150,9 @@ dependencies = [
 
 [[package]]
 name = "pyo3-anyio"
-version = "0.2.0"
-source = "git+https://github.com/fasterspeeding/pyo3-anyio?rev=ae2237e17ba6f495dfc3502bfa83dc20c62e0b18#ae2237e17ba6f495dfc3502bfa83dc20c62e0b18"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "17749199b301575363f503e25e14209a0f4118d3265de27879ab1c5ee8dc0d5c"
 dependencies = [
  "async-oneshot",
  "once_cell",

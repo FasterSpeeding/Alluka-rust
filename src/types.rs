@@ -94,7 +94,7 @@ impl InjectedType {
         if let Some(value) = self
             .type_ids
             .iter()
-            .filter_map(|cls| ctx.get_type_dependency_rust(client, cls))
+            .filter_map(|cls| ctx.get_type_dependency_rust(py, client, cls))
             .next()
         {
             return Ok(value.as_ref(py));

@@ -32,12 +32,14 @@ use std::collections::hash_map::RawEntryMut;
 use std::collections::HashMap;
 use std::convert::AsRef;
 use std::future::Future;
+use std::ptr::null_mut;
 use std::sync::{Arc, OnceLock};
 
 use pyo3::exceptions::PyKeyError;
+use pyo3::ffi::PyWeakref_NewRef;
 use pyo3::pycell::PyRef;
 use pyo3::types::{IntoPyDict, PyDict, PyTuple};
-use pyo3::{IntoPy, Py, PyAny, PyErr, PyObject, PyRefMut, PyResult, Python, ToPyObject};
+use pyo3::{AsPyPointer, IntoPy, Py, PyAny, PyErr, PyObject, PyRefMut, PyResult, Python, ToPyObject};
 use pyo3_anyio::tokio::{await_py1, fut_into_coro};
 use tokio::sync::RwLock;
 
@@ -51,6 +53,8 @@ type DescriptorMap = Arc<RwLock<HashMap<isize, Arc<Box<[InjectedTuple]>>>>>;
 
 static ALLUKA: OnceLock<PyObject> = OnceLock::new();
 static ASYNCIO: OnceLock<PyObject> = OnceLock::new();
+static CLIENT_TYPES: OnceLock<(isize, isize)> = OnceLock::new();
+static CONTEXT_ABC_TYPE: OnceLock<isize> = OnceLock::new();
 static SELF_INJECTING: OnceLock<PyObject> = OnceLock::new();
 
 fn import_alluka(py: Python) -> PyResult<&PyAny> {
@@ -65,19 +69,36 @@ fn import_asyncio(py: Python) -> PyResult<&PyAny> {
         .map(|value| value.as_ref(py))
 }
 
+fn import_client_types(py: Python) -> &(isize, isize) {
+    CLIENT_TYPES
+        .get_or_try_init(|| {
+            let abc_hash = py.import("alluka.abc")?.getattr("Client")?.hash()?;
+            let impl_hash = py.import("alluka")?.getattr("Client")?.hash()?;
+            Ok::<_, PyErr>((impl_hash, abc_hash))
+        })
+        .unwrap()
+}
+
+fn import_context_type(py: Python) -> &isize {
+    CONTEXT_ABC_TYPE
+        .get_or_try_init(|| py.import("alluka.abc")?.getattr("Context")?.hash())
+        .unwrap()
+}
+
 fn import_self_injecting(py: Python) -> PyResult<&PyAny> {
     SELF_INJECTING
         .get_or_try_init(|| Ok(py.import("alluka._self_injecting")?.to_object(py)))
         .map(|value| value.as_ref(py))
 }
 
-#[pyo3::pyclass(subclass)]
+#[pyo3::pyclass(subclass, weakref)]
 pub struct Client {
     callback_overrides: HashMap<isize, PyObject>,
     descriptors: DescriptorMap,
     introspect_annotations: bool,
     maybe_await: PyObject,
     type_dependencies: HashMap<isize, PyObject>,
+    py_self: OnceLock<PyObject>,
 }
 
 
@@ -103,7 +124,6 @@ async fn build_descriptors_async(
     })
 }
 
-
 impl Client {
     fn build_descriptors(&self, py: Python, callback: &PyAny) -> PyResult<Arc<Box<[InjectedTuple]>>> {
         let key = callback.hash()?;
@@ -126,8 +146,21 @@ impl Client {
         })
     }
 
-    pub fn get_type_dependency_rust<'a>(&'a self, type_: &isize) -> Option<&'a PyObject> {
-        self.type_dependencies.get(type_)
+    pub fn get_type_dependency_rust<'p>(
+        self: &'p PyRef<'p, Self>,
+        py: Python<'p>,
+        type_: &isize,
+    ) -> Option<&'p PyObject> {
+        self.type_dependencies.get(type_).or_else(|| {
+            let client_types = import_client_types(py);
+            if &client_types.0 == type_ || &client_types.1 == type_ {
+                return Some(self.py_self.get_or_init(|| unsafe {
+                    Py::from_borrowed_ptr(py, PyWeakref_NewRef(self.as_ptr(), null_mut()))
+                }));
+            } else {
+                None
+            }
+        })
     }
 
     pub fn call_with_ctx_rust<'p>(
@@ -264,7 +297,7 @@ impl Client {
     #[new]
     #[args("*", introspect_annotations = "true")]
     fn new(py: Python, introspect_annotations: bool) -> PyResult<Self> {
-        let globals_ = [("iscoroutine", py.import("asyncio")?.getattr("iscoroutine")?)].into_py_dict(py);
+        let globals_ = [("iscoroutine", import_asyncio(py)?.getattr("iscoroutine")?)].into_py_dict(py);
         py.run(
             r#"
 async def maybe_await(callback, args, kwargs):
@@ -289,6 +322,7 @@ async def maybe_await(callback, args, kwargs):
             introspect_annotations,
             maybe_await: globals_.get_item("maybe_await").unwrap().to_object(py),
             type_dependencies: HashMap::new(),
+            py_self: OnceLock::new(),
         })
     }
 
@@ -329,7 +363,6 @@ async def maybe_await(callback, args, kwargs):
         args: &PyTuple,
         kwargs: Option<&PyDict>,
     ) -> PyResult<PyObject> {
-        println!("b");
         ctx.borrow(py).call_with_di(py, callback, args, kwargs)
     }
 
@@ -426,22 +459,33 @@ async def maybe_await(callback, args, kwargs):
     }
 }
 
-#[pyo3::pyclass(subclass)]
+#[pyo3::pyclass(subclass, weakref)]
 pub struct BasicContext {
     pub client: Py<Client>,
     result_cache: HashMap<isize, PyObject>,
     special_cased_types: HashMap<isize, PyObject>,
+    py_self: OnceLock<PyObject>,
 }
 
 impl BasicContext {
     pub fn get_type_dependency_rust<'p>(
-        &'p self,
+        self: &'p PyRef<'p, Self>,
+        py: Python<'p>,
         client: &'p PyRef<'p, Client>,
         type_: &isize,
     ) -> Option<&'p PyObject> {
         self.special_cased_types
             .get(type_)
-            .or_else(|| client.get_type_dependency_rust(type_))
+            .or_else(|| client.get_type_dependency_rust(py, type_))
+            .or_else(|| {
+                if type_ == import_context_type(py) {
+                    Some(self.py_self.get_or_init(|| unsafe {
+                        Py::from_borrowed_ptr(py, PyWeakref_NewRef(self.as_ptr(), null_mut()))
+                    }))
+                } else {
+                    None
+                }
+            })
     }
 
     pub fn call_with_di_rust<'p>(
@@ -475,6 +519,7 @@ impl BasicContext {
             client,
             result_cache: HashMap::with_capacity(0),
             special_cased_types: HashMap::with_capacity(0),
+            py_self: OnceLock::new(),
         }
     }
 
@@ -530,13 +575,13 @@ impl BasicContext {
     }
 
     #[args(type_, "/", "*", default)]
-    fn get_type_dependency(&self, py: Python, type_: &PyAny, default: Option<PyObject>) -> PyResult<PyObject> {
-        let hash = type_.hash()?;
-        if let Some(result) = self.special_cased_types.get(&hash) {
-            return Ok(result.clone_ref(py));
-        }
-
-        if let Some(result) = self.get_type_dependency_rust(&self.client.borrow(py), &type_.hash()?) {
+    fn get_type_dependency(
+        self: PyRef<'_, Self>,
+        py: Python,
+        type_: &PyAny,
+        default: Option<PyObject>,
+    ) -> PyResult<PyObject> {
+        if let Some(result) = self.get_type_dependency_rust(py, &self.client.borrow(py), &type_.hash()?) {
             return Ok(result.clone_ref(py));
         }
 
