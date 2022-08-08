@@ -18,7 +18,7 @@ filelock==3.7.1
     # via virtualenv
 maturin==0.13.0
     # via -r dev-requirements.in
-nox==2022.1.7
+nox==2022.8.7
     # via -r dev-requirements.in
 packaging==21.3
     # via
