@@ -16,7 +16,7 @@ distlib==0.3.4
     # via virtualenv
 filelock==3.7.1
     # via virtualenv
-maturin==0.13.0
+maturin==0.13.2
     # via -r dev-requirements.in
 nox==2022.1.7
     # via -r dev-requirements.in
