@@ -19,7 +19,7 @@ rev = "ae2237e17ba6f495dfc3502bfa83dc20c62e0b18"
 
 [dependencies.tokio]
 features = ["sync"]
-version = "1.20.0"
+version = "1.21.0"
 
 [profile.release]
 codegen-units = 1
