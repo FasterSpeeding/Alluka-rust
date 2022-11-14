@@ -26,7 +26,7 @@ packaging==21.3
     #   nox
 pep517==0.12.0
     # via build
-pip-tools==6.8.0
+pip-tools==6.10.0
     # via -r dev-requirements.in
 platformdirs==2.5.2
     # via virtualenv
@@ -37,9 +37,7 @@ pyparsing==3.0.9
 six==1.16.0
     # via virtualenv
 tomli==2.0.1
-    # via
-    #   build
-    #   maturin
+    # via pep517
 virtualenv==20.15.1
     # via nox
 wheel==0.37.1
