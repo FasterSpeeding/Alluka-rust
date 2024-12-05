@@ -31,7 +31,7 @@
 #![allow(clippy::borrow_deref_ref)] // Leads to a ton of false positives around args of py types.
 #![feature(arbitrary_self_types)]
 #![feature(hash_raw_entry)]
-#![feature(once_cell)]
+#![feature(once_cell_try)]
 use client::{BasicContext, Client};
 use pyo3::types::{PyModule, PyType};
 use pyo3::{wrap_pyfunction, PyResult, Python};
